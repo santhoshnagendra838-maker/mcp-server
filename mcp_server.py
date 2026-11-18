@@ -1,12 +1,21 @@
 import sys
 import os
+import logging
 from urllib.parse import urlparse
 
 import wikipedia
 import wikipedia.wikipedia as wikipedia_api
 from mcp.server.fastmcp import FastMCP
+from mcp.types import CallToolRequest, ListToolsRequest
 
 mcp = FastMCP("WikipediaSearch")
+logging.basicConfig(
+    level=os.getenv("MCP_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    stream=sys.stderr,
+)
+logger = logging.getLogger("wikipedia_mcp")
+
 
 # Wikimedia requires API clients to identify themselves with a descriptive
 # User-Agent; the wikipedia package's default is rejected by the API.
@@ -113,7 +122,46 @@ def get_section_content(topic: str, section_title: str) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
+
+def _install_request_logging() -> None:
+    handlers = mcp._mcp_server.request_handlers
+
+    list_handler = handlers[ListToolsRequest]
+
+    async def logged_list_handler(request):
+        logger.info("Received ListToolsRequest")
+        result = await list_handler(request)
+        tools = getattr(getattr(result, "root", None), "tools", [])
+        logger.info(
+            "ListToolsRequest completed; tools=%s",
+            ", ".join(tool.name for tool in tools) or "none",
+        )
+        return result
+
+    call_handler = handlers[CallToolRequest]
+
+    async def logged_call_handler(request):
+        name = request.params.name
+        arguments = request.params.arguments or {}
+        # Log argument names only; values may contain user-provided data.
+        logger.info(
+            "Received CallToolRequest name=%s argument_keys=%s",
+            name,
+            ", ".join(sorted(arguments)) or "none",
+        )
+        result = await call_handler(request)
+        call_result = getattr(result, "root", None)
+        if getattr(call_result, "isError", False):
+            logger.warning("CallToolRequest failed: %s", name)
+        else:
+            logger.info("CallToolRequest completed: %s", name)
+        return result
+
+    handlers[ListToolsRequest] = logged_list_handler
+    handlers[CallToolRequest] = logged_call_handler
+
 # Run the MCP server
 if __name__ == "__main__":
+    _install_request_logging()
     print("Starting MCP Wikipedia Server...", file=sys.stderr)
     mcp.run(transport="stdio")

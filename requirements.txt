@@ -1,0 +1,6 @@
+mcp>=1.11.0,<2
+wikipedia>=1.4.0,<2
+langgraph>=0.2.0,<1
+langchain-openai>=0.2.0,<2
+langchain-mcp-adapters<0.3.0
+streamlit>=1.40.0,<2
